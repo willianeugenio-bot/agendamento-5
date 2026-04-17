@@ -1,0 +1,66 @@
+import requests
+import json
+import os
+from datetime import datetime, timedelta, timezone
+
+# URIs dos novos assessores da equipe "Vida com CNPJ"
+URIs = [
+    "https://api.calendly.com/event_types/d1ff6c42-c263-4ed0-bf4a-37fe9d3a5b48", 
+    "https://api.calendly.com/event_types/f983ca75-4dfb-41b3-b409-82acb52e2c0a", 
+    "https://api.calendly.com/event_types/b9b65493-c2b6-4993-9968-262aa03968c4"
+]
+
+# Mapeamento (As cores não aparecerão na tela final, mas mantemos por estrutura)
+MAPA_NOMES = {
+    "d1ff6c42-c263-4ed0-bf4a-37fe9d3a5b48": {"nome": "Robson", "cor": "#007bff"},
+    "f983ca75-4dfb-41b3-b409-82acb52e2c0a": {"nome": "Stephanie", "cor": "#007bff"},
+    "b9b65493-c2b6-4993-9968-262aa03968c4": {"nome": "Eliz", "cor": "#007bff"}
+}
+
+TOKEN = os.getenv("CALENDLY_TOKEN")
+headers = {"Authorization": f"Bearer {TOKEN}"}
+
+def obter_horarios():
+    eventos_final = []
+    agora_utc = datetime.now(timezone.utc)
+
+    for uri in URIs:
+        uuid = uri.split('/')[-1]
+        info = MAPA_NOMES.get(uuid)
+        
+        if not info:
+            continue # Pula se o UUID não estiver no mapa
+            
+        # Dividimos em duas buscas para respeitar o limite de 7 dias do Calendly
+        # Fatias: [Hoje até dia 7] e [Dia 7 até dia 10]
+        intervalos = [
+            (agora_utc + timedelta(minutes=1), agora_utc + timedelta(days=7)),
+            (agora_utc + timedelta(days=7, minutes=1), agora_utc + timedelta(days=15))
+        ]
+        
+        for start_time, end_time in intervalos:
+            params = {
+                "event_type": uri,
+                "start_time": start_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                "end_time": end_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            }
+            
+            try:
+                res = requests.get("https://api.calendly.com/event_type_available_times", headers=headers, params=params)
+                if res.status_code == 200:
+                    slots = res.json().get('collection', [])
+                    for slot in slots:
+                        eventos_final.append({
+                            "title": f"Falar com {info['nome']}",
+                            "start": slot['start_time'],
+                            "url": slot['scheduling_url']
+                        })
+            except Exception as e:
+                print(f"Erro ao processar {info['nome']}: {e}")
+
+    with open("horarios.json", "w") as f:
+        json.dump(eventos_final, f, indent=4)
+    print("Arquivo horarios.json atualizado com sucesso (10 dias buscados).")
+
+if __name__ == "__main__":
+    obter_horarios()
